@@ -98,6 +98,7 @@ WHERE kind_of_business in ('Men''s clothing stores'
 ,'Women''s clothing stores')
 ;
 
+
 select 
 	sales_year
 	,womens_sales - mens_sales as womens_minus_mens
@@ -149,7 +150,7 @@ GROUP BY 1;
 
 SELECT 
 	sales_year
-	,round(womens_sales / mens_sales,2) as womens_times_of_mens
+	,round(womens_sales / mens_sales,1) as womens_times_of_mens
 FROM
 	(
 	SELECT 
@@ -174,6 +175,7 @@ order by 1
 ;
 
 
+--- diferença em percentual
 SELECT 
 	sales_year
 	,round((womens_sales / mens_sales -1) * 100,2) as womens_times_of_mens
@@ -304,6 +306,26 @@ group by 1,2
 order by 1
 ;
 
+
+---trabalhando com indexação anual
+
+with tb_year_sales as
+(
+select 
+	DATE_PART('year', sales_month) as sales_year,
+	sum(sales) as sales
+from retail_sales rs
+where kind_of_business = 'Women''s clothing stores'
+group by 1
+)
+select 
+	sales_year,
+	sales,
+	first_value(sales) over (order by sales_year) as index_sales,
+	round((sales / first_value(sales) over (order by sales_year) -1) * 100,2) as pct_from_index
+from tb_year_sales
+
+
 -- USANDO FUNÇAO DE JANELA
 select
 	sales_month
@@ -374,6 +396,50 @@ from
 
 select * from date_dim;
 
+---- MÉDIAS MOVEIS
+-- cuidado ao utilizar os meses - utilizar 11 pois ambas as pontas são inclusivas
+
+select 	
+	A.SALES_MONTH,
+	A.SALES,
+	B.SALES_MONTH as ROLLING_SALES_MONTH,
+	B.SALES as ROLLING_sALES
+from retail_sales a 
+	join retail_sales b on a.kind_of_business = b.kind_of_business
+		and b.sales_month between a.sales_month - interval '11 months' and a.sales_month
+		and b.kind_of_business = 'Women''s clothing stores'
+where a.kind_of_business = 'Women''s clothing stores'
+	and a.sales_month = '2019-12-01'
+
+
+	
+	---- CÁLCULO DE MÉDIA MÓVEL COM SELF JOIN
+	
+	select 
+		A.SALES_MONTH,
+		A.SALES,
+		AVG(B.SALES) as MOVING_AVG,
+		COUNT(B.SALES) as RECORD_COUNT
+	from retail_sales A
+		join retail_sales B 
+			on A.kind_of_business = B.kind_of_business 
+			and B.sales_month between A.SALES_MONTH - interval '11 months' and a.sales_month
+			and b.kind_of_business = 'Women''s clothing stores'
+	where a.kind_of_business = 'Women''s clothing stores'
+		--and a.sales_month >= '1993-01-01'
+	group by 1,2
+			
+			
+-- MESMO CÁLCULO DE MÉDIAS MÓVEIS COM FUNÇÃO DE JANELA
+
+	select 
+		SALES_MONTH,
+		AVG(SALES) over (order by SALES_MONTH rows between 11 preceding and 0 preceding) as MOVING_AVG,
+		COUNT(SALES) over (order by SALES_MONTH rows between 11 preceding and 0 preceding) as RECORD_COUNT
+	from retail_sales
+	where kind_of_business = 'Women''s clothing stores'
+			
+-- cruzando com dimensão de datas e selecionando os meses 1 e 7. nem todos possuem dados
 
 select
 	a.date,
@@ -423,6 +489,34 @@ group by 1
 ;
 
 
+
+select
+	a.date
+	--max(case when a.date = b.sales_month then 1 end) as sales_in_month
+	,avg(b.sales) as moving_avg
+	,count(b.sales) as records
+from
+	date_dim a
+join
+	(
+	select
+		sales_month,
+		sales
+	from
+		retail_sales
+	where
+		kind_of_business = 'Women''s clothing stores'
+		and date_part('month', sales_month) in (1, 7)
+	) b on b.sales_month between a.date - interval '11 months' and a.date
+where a.date = a.first_day_of_month
+	and a.date between '1993-01-01' and '2020-12-01'
+	and a.date = b.sales_month
+group by 1
+;
+
+
+-- usar na ausência de uma dimensão de calendário no banco de dados
+
 select
 	a.sales_month,
 	avg(b.sales) as moving_avg
@@ -440,6 +534,9 @@ join retail_sales b
 		and b.kind_of_business = 'Women''s clothing stores'
 group by 1
 ;
+
+
+
 
 -- YTD
  -- USANDO WINDOW FUNCTIONS
@@ -485,7 +582,7 @@ select
 	lag(yearly_sales) over (order by sales_year) as prev_year_sales, 
 	(yearly_sales / lag(yearly_sales) over (order by sales_year)-1) * 100 as pct_growth_from_previous
 from
-	(
+	( -- agregação por ano
 	select
 		date_part('year', sales_month) as sales_year,
 		sum(sales) as yearly_sales
@@ -527,6 +624,8 @@ where kind_of_business = 'Book stores'
 ;
 
 
+
+
 select
 	date_part('month', sales_month) as month_number,
 	to_char(sales_month, 'Month') as month_name,
@@ -555,6 +654,9 @@ where kind_of_business = 'Book stores'
 select
 	sales_month,
 	sales,
+	prev_sales_1,
+	prev_sales_2,
+	prev_sales_3,
 	sales / ((prev_sales_1 + prev_sales_2 + prev_sales_3) / 3)
 as pct_of_3_prev
 from
